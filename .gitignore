@@ -18,3 +18,10 @@ wheels/
 # Temp
 *.log
 temp/
+temp.ipynb
+
+# Langgraph api
+.langgraph_api/
+
+# default working directory
+_workspace/

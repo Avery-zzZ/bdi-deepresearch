@@ -1,0 +1,11 @@
+{
+    "dependencies": [
+        "."
+    ],
+    "graphs": {
+        "web_researcher": "apps.langsmith_:make_web_researcher",
+        "kb_researcher": "apps.langsmith_:make_kb_researcher",
+        "deep_researcher": "apps.langsmith_:deep_researcher"
+    },
+    "env": ".env"
+}
