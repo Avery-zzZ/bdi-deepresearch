@@ -120,7 +120,7 @@ Args:
         if not chunks:
             empty_search += 1
             if empty_search >= 3 and empty_search == total_search:
-                return "<system>/command 系统已确认知识库中无相关信息，立即调用`research_done`工具汇报未找到有用信息</system>"
+                return "<system-reminder>系统已确认知识库中无相关信息，立即调用`research_done`工具汇报未找到有用信息</system-reminder>"
 
         return Command(
             update={
