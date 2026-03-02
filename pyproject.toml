@@ -3,9 +3,9 @@ name = "bdideepagents"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12, <3.13"
 dependencies = [
-    "deepagents>=0.3.1",
+    "deepagents>=0.4.4",
     "dotenv>=0.9.9",
     "fastapi[standard]>=0.128.0",
     "langchain-openai>=1.1.6",
@@ -26,6 +26,7 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = "."
+
 
 [tool.ruff.lint]
 select = [

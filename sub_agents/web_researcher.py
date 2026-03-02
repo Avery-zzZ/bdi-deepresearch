@@ -8,6 +8,7 @@ from langchain.agents.middleware import AgentMiddleware, TodoListMiddleware
 from langchain.chat_models import BaseChatModel
 from langchain.tools import BaseTool, ToolRuntime, tool
 from langgraph.graph.state import CompiledStateGraph
+from openai import models
 
 from events import NewSubResearch
 from schemas import DeepResearchContext
@@ -28,7 +29,7 @@ _RESEARCHER_SYSTEM_PROMPT = """你是一个专业的研究助手，负责收集�
 ## 可用工具
 1. `{search_tool_name}` - 网络搜索，获取最新信息
 2. `think` - 反思搜索结果，规划下一步
-3. `write_file` - 保存研究发现到文件。格式: write_file("/research_主题.md", 内容)
+3. `write_file_with_unique_name` - 保存研究发现到文件，自动处理文件名冲突。格式: write_file_with_unique_name("/research_主题.md", 内容)
 4. `research_done` - 向上级汇报研究成果
 
 ## 文件系统
@@ -57,10 +58,10 @@ _RESEARCHER_SYSTEM_PROMPT = """你是一个专业的研究助手，负责收集�
    - 详细记录所有发现
    - 使用 [标题](URL) 格式引用来源
    - 在末尾列出所有来源
-2. **必须使用 write_file 保存研究发现**：
-   - 格式：`write_file("/research_主题关键词.md", 研究发现内容)`
-   - 例如：`write_file("/research_deepseek.md", "# Deepseek研究发现\n...")`
-   - 如果发现同名文件，考虑更换一个命名保存
+2. **必须使用 write_file_with_unique_name 保存研究发现**：
+   - 格式：`write_file_with_unique_name("/research_主题关键词.md", 研究发现内容)`
+   - 例如：`write_file_with_unique_name("/research_deepseek.md", "# Deepseek研究发现\n...")`
+   - 如果发现同名文件，工具会自动在文件名后添加数字后缀，例如：`/research_主题关键词_1.md`、`/research_主题关键词_2.md`等
 
 #### 报告风格
 尽量使用完整的长句表达，仅在必要时使用list样式的罗列，用户更喜欢段落式的完整表述，因为这样可以让报告看起来更专业
@@ -76,13 +77,65 @@ _RESEARCHER_SYSTEM_PROMPT = """你是一个专业的研究助手，负责收集�
 """
 
 
+def get_unique_filename(filepath: str) -> str:
+    """获取唯一的文件名，如果文件已存在则添加数字后缀
+    
+    Args:
+        filepath: 原始文件路径
+        
+    Returns:
+        唯一的文件路径
+    """
+    import os
+    if not os.path.exists(filepath):
+        return filepath
+    
+    base, ext = os.path.splitext(filepath)
+    counter = 1
+    while True:
+        new_filepath = f"{base}_{counter}{ext}"
+        if not os.path.exists(new_filepath):
+            return new_filepath
+        counter += 1
+
+
 def create_agent(
     model: BaseChatModel,
     workspace: Path,
     search_tool: BaseTool,
     extra_middlewares: list[AgentMiddleware] = None,
 ) -> CompiledStateGraph:
-    tools = [think, search_tool, research_done]
+    from langchain.tools import tool
+    
+    @tool
+    def write_file_with_unique_name(filepath: str, content: str) -> str:
+        """保存研究发现到文件，自动处理文件名冲突
+        
+        Args:
+            filepath: 文件路径
+            content: 文件内容
+            
+        Returns:
+            保存结果
+        """
+        import os
+        # 构建完整的文件路径
+        full_path = os.path.join(str(workspace), filepath.lstrip('/'))
+        # 获取唯一的文件名
+        unique_path = get_unique_filename(full_path)
+        # 转换回相对路径格式
+        relative_path = '/' + os.path.relpath(unique_path, str(workspace))
+        # 使用FilesystemMiddleware的write_file功能
+        from deepagents.middleware.filesystem import FilesystemMiddleware
+        backend = FilesystemBackend(
+            root_dir=workspace,
+            virtual_mode=True,
+        )
+        # 直接使用backend写入文件
+        backend.write(relative_path, content)
+        return f"文件已保存到: {relative_path}"
+
+    tools = [think, search_tool, write_file_with_unique_name, research_done]
 
     filesystem_backend = FilesystemBackend(
         root_dir=workspace,
@@ -151,8 +204,22 @@ def _create_agent_as_lc_tool(
             s = await agent.ainvoke(
                 {"messages": [{"role": "user", "content": instruction}]},
             )
-            m: AIMessage = s["messages"][-2]
-            return m.tool_calls[0]["args"]["brief"]
+            # 遍历所有消息，找到最后一次调用research_done工具的消息
+            research_done_message = None
+            for msg in s["messages"]:
+                if hasattr(msg, "tool_calls") and msg.tool_calls:
+                    for tool_call in msg.tool_calls:
+                        if tool_call["name"] == "research_done":
+                            research_done_message = msg
+                            break
+            
+            if research_done_message:
+                # 找到最后一次调用research_done的工具调用
+                for tool_call in research_done_message.tool_calls:
+                    if tool_call["name"] == "research_done":
+                        return tool_call["args"].get("brief", "研究完成，但未提供摘要")
+            
+            return "研究完成，但未找到research_done工具调用"
         except Exception as e:
             return f"研究过程中出现错误: {e}"
 
